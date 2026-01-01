@@ -1,24 +1,19 @@
-
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     
-    // Serve the GUI for root path
     if (url.pathname === '/' || url.pathname === '') {
       return new Response(HTML_CONTENT, {
         headers: { 'Content-Type': 'text/html;charset=UTF-8' }
       });
     }
     
-    // API endpoint to get status
     if (url.pathname === '/api/status') {
       const startTime = Date.now();
       
-      // Get or initialize start time from KV or memory
       const serviceStartTime = env.START_TIME || Date.now();
       
       try {
-        // Test GitHub API connectivity
         const testResponse = await fetch('https://api.github.com/zen', {
           headers: {
             'User-Agent': 'Where-CloudflareWorker/1.0'
@@ -27,7 +22,6 @@ export default {
         
         const latency = Date.now() - startTime;
         
-        // Calculate real uptime
         const uptimeMs = Date.now() - serviceStartTime;
         const uptimeDays = Math.floor(uptimeMs / (1000 * 60 * 60 * 24));
         const uptimeHours = Math.floor((uptimeMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
@@ -65,42 +59,43 @@ export default {
       }
     }
     
-    // Proxy GitHub requests
-    if (url.pathname.startsWith('/proxy/')) {
-      const targetPath = url.pathname.replace('/proxy/', '');
-      const targetUrl = `https://github.com/${targetPath}${url.search}`;
+    const targetPath = url.pathname.slice(1);
+    const targetUrl = `https://github.com/${targetPath}${url.search}`;
+    
+    try {
+      const modifiedHeaders = new Headers(request.headers);
+      modifiedHeaders.set('Host', 'github.com');
       
-      try {
-        // Clone the request
-        const modifiedRequest = new Request(targetUrl, {
-          method: request.method,
-          headers: request.headers,
-          body: request.body,
-          redirect: 'manual'
-        });
-        
-        // Forward to GitHub
-        const response = await fetch(modifiedRequest);
-        
-        // Clone response with CORS headers
-        const modifiedResponse = new Response(response.body, response);
-        modifiedResponse.headers.set('Access-Control-Allow-Origin', '*');
-        modifiedResponse.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        modifiedResponse.headers.set('Access-Control-Allow-Headers', '*');
-        
-        return modifiedResponse;
-      } catch (error) {
-        return new Response(JSON.stringify({ error: error.message }), {
-          status: 500,
-          headers: { 
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*'
-          }
-        });
-      }
+      const modifiedRequest = new Request(targetUrl, {
+        method: request.method,
+        headers: modifiedHeaders,
+        body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : null,
+        redirect: 'manual'
+      });
+      
+      const response = await fetch(modifiedRequest);
+      
+      const modifiedResponse = new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers
+      });
+      
+      modifiedResponse.headers.set('Access-Control-Allow-Origin', '*');
+      modifiedResponse.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD');
+      modifiedResponse.headers.set('Access-Control-Allow-Headers', '*');
+      
+      return modifiedResponse;
+    } catch (error) {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
     }
     
-    // Handle OPTIONS for CORS
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
@@ -402,7 +397,19 @@ const HTML_CONTENT = `<!DOCTYPE html>
     </div>
     
     <div class="config-section">
-      <h2 class="section-title">Configure Git DNS</h2>
+      <h2 class="section-title">Quick Start - Direct Usage</h2>
+      <p style="margin-bottom: 1rem; color: #7f8c8d;">Use directly without any git configuration. Just replace github.com with your worker domain:</p>
+      
+      <div class="code-block" id="direct-usage"></div>
+      
+      <div class="info-box">
+        <strong>Pro Tip:</strong> This method works immediately without any setup. Perfect for one-time clones or quick access!
+      </div>
+    </div>
+    
+    <div class="config-section">
+      <h2 class="section-title">Advanced - Global Git Configuration</h2>
+      <p style="margin-bottom: 1rem; color: #7f8c8d;">Configure Git to automatically use this proxy for all GitHub operations:</p>
       
       <div class="input-group">
         <label for="protocol">Protocol</label>
@@ -423,25 +430,24 @@ const HTML_CONTENT = `<!DOCTYPE html>
         <div class="code-block" id="git-config"></div>
         
         <div class="info-box">
-          <strong>How to use:</strong> Copy the command above and run it in your terminal. This will configure Git to use this proxy for GitHub access.
+          <strong>How to use:</strong> Copy and run the command above in your terminal. All future GitHub operations will automatically use this proxy.
         </div>
       </div>
     </div>
     
     <div class="config-section">
       <h2 class="section-title">Testing Connection</h2>
-      <p style="margin-bottom: 1rem; color: #7f8c8d;">Test if GitHub is accessible through this proxy</p>
+      <p style="margin-bottom: 1rem; color: #7f8c8d;">Test if GitHub is accessible through this proxy:</p>
       <button class="button" onclick="testConnection()">Test Now</button>
       <div id="test-result" style="margin-top: 1rem;"></div>
     </div>
     
     <footer>
-      <p>Made by <a href="https://servernotdie.com" class="footer-link" target="_blank">servernotdie</a> • 2025-2026</p>
+      <p>Made by <a href="https://servernotdie.com" class="footer-link" target="_blank">servernotdie</a> 2025-2026</p>
     </footer>
   </div>
   
   <script>
-    // Typing animation
     const titleEl = document.getElementById('title');
     const text = 'Where?';
     let i = 0;
@@ -472,7 +478,6 @@ const HTML_CONTENT = `<!DOCTYPE html>
     
     typeWriter();
     
-    // Service start time (stored in memory for this session)
     const serviceStartTime = Date.now();
     
     async function fetchStatus() {
@@ -501,11 +506,9 @@ const HTML_CONTENT = `<!DOCTYPE html>
       const protocol = document.getElementById('protocol').value;
       const workerUrl = document.getElementById('worker-url').value || window.location.host;
       
-      const config = \`# Configure Git to use Where? proxy
-git config --global url."\${protocol}://\${workerUrl}/proxy/".insteadOf "https://github.com/"
+      const config = \`git config --global url."\${protocol}://\${workerUrl}/proxy/".insteadOf "https://github.com/"
 
-# To revert this configuration:
-# git config --global --unset url.\${protocol}://\${workerUrl}/proxy/.insteadOf\`;
+git config --global --unset url.\${protocol}://\${workerUrl}/proxy/.insteadOf\`;
       
       document.getElementById('git-config').textContent = config;
       document.getElementById('config-output').style.display = 'block';
@@ -517,32 +520,36 @@ git config --global url."\${protocol}://\${workerUrl}/proxy/".insteadOf "https:/
       
       try {
         const start = Date.now();
-        const response = await fetch('/proxy/');
+        const response = await fetch('/torvalds/linux');
         const elapsed = Date.now() - start;
         
-        if (response.ok) {
+        if (response.ok || response.status === 301 || response.status === 302) {
           resultDiv.innerHTML = \`<div class="info-box" style="background:#d5f4e6;border-color:#27ae60;">
-            <strong>✓ Success!</strong> GitHub is accessible through this proxy (responded in \${elapsed}ms)
+            <strong>Success!</strong> GitHub is accessible through this proxy (responded in \${elapsed}ms)
           </div>\`;
         } else {
           resultDiv.innerHTML = \`<div class="info-box" style="background:#fadbd8;border-color:#e74c3c;">
-            <strong>✗ Failed</strong> Connection test failed with status: \${response.status}
+            <strong>Failed</strong> Connection test failed with status: \${response.status}
           </div>\`;
         }
       } catch (error) {
         resultDiv.innerHTML = \`<div class="info-box" style="background:#fadbd8;border-color:#e74c3c;">
-          <strong>✗ Error</strong> \${error.message}
+          <strong>Error</strong> \${error.message}
         </div>\`;
       }
     }
     
-    // Set worker URL on page load
-    document.getElementById('worker-url').value = window.location.host;
+    const workerDomain = window.location.host;
+    document.getElementById('worker-url').value = workerDomain;
     
-    // Fetch status on load
+    const directUsageEl = document.getElementById('direct-usage');
+    directUsageEl.textContent = \`git clone https://\${workerDomain}/torvalds/linux.git
+
+git clone https://\${workerDomain}/microsoft/vscode.git
+git clone https://\${workerDomain}/your-username/your-repo.git\`;
+    
     fetchStatus();
     
-    // Refresh status every 30 seconds
     setInterval(fetchStatus, 30000);
   </script>
 </body>
