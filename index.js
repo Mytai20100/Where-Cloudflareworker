@@ -1,5 +1,3 @@
-// Where? - Cloudflare Worker DNS Proxy for GitHub
-// A minimal, modern DNS proxy to bypass GitHub blocks
 
 export default {
   async fetch(request, env, ctx) {
@@ -16,6 +14,9 @@ export default {
     if (url.pathname === '/api/status') {
       const startTime = Date.now();
       
+      // Get or initialize start time from KV or memory
+      const serviceStartTime = env.START_TIME || Date.now();
+      
       try {
         // Test GitHub API connectivity
         const testResponse = await fetch('https://api.github.com/zen', {
@@ -26,9 +27,20 @@ export default {
         
         const latency = Date.now() - startTime;
         
+        // Calculate real uptime
+        const uptimeMs = Date.now() - serviceStartTime;
+        const uptimeDays = Math.floor(uptimeMs / (1000 * 60 * 60 * 24));
+        const uptimeHours = Math.floor((uptimeMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const uptimeMinutes = Math.floor((uptimeMs % (1000 * 60 * 60)) / (1000 * 60));
+        
+        let uptimeString = '';
+        if (uptimeDays > 0) uptimeString += `${uptimeDays}d `;
+        if (uptimeHours > 0) uptimeString += `${uptimeHours}h `;
+        uptimeString += `${uptimeMinutes}m`;
+        
         return new Response(JSON.stringify({
           status: 'operational',
-          uptime: '99.9%',
+          uptime: uptimeString.trim(),
           latency: latency,
           github_status: testResponse.ok ? 'accessible' : 'limited',
           timestamp: new Date().toISOString()
@@ -145,12 +157,34 @@ const HTML_CONTENT = `<!DOCTYPE html>
       color: #2c3e50;
       margin-bottom: 0.5rem;
       letter-spacing: -1px;
+      min-height: 4.5rem;
     }
     
     .subtitle {
       font-size: 1.1rem;
       color: #7f8c8d;
       font-weight: 400;
+      opacity: 0;
+      animation: fadeIn 0.5s ease-in 3s forwards;
+    }
+    
+    @keyframes fadeIn {
+      to { opacity: 1; }
+    }
+    
+    @keyframes blink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0; }
+    }
+    
+    .cursor {
+      display: inline-block;
+      width: 3px;
+      height: 3rem;
+      background: #3498db;
+      margin-left: 4px;
+      animation: blink 0.7s infinite;
+      vertical-align: middle;
     }
     
     .status-grid {
@@ -309,6 +343,17 @@ const HTML_CONTENT = `<!DOCTYPE html>
       font-size: 0.9rem;
     }
     
+    .footer-link {
+      color: #7f8c8d;
+      text-decoration: none;
+      font-weight: 600;
+      transition: color 0.2s;
+    }
+    
+    .footer-link:hover {
+      color: #3498db;
+    }
+    
     .loading {
       display: inline-block;
       width: 20px;
@@ -327,8 +372,8 @@ const HTML_CONTENT = `<!DOCTYPE html>
 <body>
   <div class="container">
     <header>
-      <h1>Where?</h1>
-      <p class="subtitle">GitHub DNS Proxy via Cloudflare Workers</p>
+      <h1 id="title"></h1>
+      <p class="subtitle">Cloudflare Workers DNS Proxy</p>
     </header>
     
     <div class="status-grid">
@@ -391,11 +436,45 @@ const HTML_CONTENT = `<!DOCTYPE html>
     </div>
     
     <footer>
-      <p><strong>where-cloudflareworker</strong> • Bypass GitHub blocks with ease</p>
+      <p>Made by <a href="https://servernotdie.com" class="footer-link" target="_blank">servernotdie</a> • 2025-2026</p>
     </footer>
   </div>
   
   <script>
+    // Typing animation
+    const titleEl = document.getElementById('title');
+    const text = 'Where?';
+    let i = 0;
+    let isDeleting = false;
+    
+    function typeWriter() {
+      if (!isDeleting && i < text.length) {
+        titleEl.innerHTML = text.substring(0, i + 1) + '<span class="cursor"></span>';
+        i++;
+        setTimeout(typeWriter, 150);
+      } else if (!isDeleting && i === text.length) {
+        setTimeout(() => {
+          isDeleting = true;
+          typeWriter();
+        }, 1500);
+      } else if (isDeleting && i > 0) {
+        titleEl.innerHTML = text.substring(0, i - 1) + '<span class="cursor"></span>';
+        i--;
+        setTimeout(typeWriter, 100);
+      } else if (isDeleting && i === 0) {
+        titleEl.innerHTML = '<span class="cursor"></span>';
+        setTimeout(() => {
+          isDeleting = false;
+          typeWriter();
+        }, 500);
+      }
+    }
+    
+    typeWriter();
+    
+    // Service start time (stored in memory for this session)
+    const serviceStartTime = Date.now();
+    
     async function fetchStatus() {
       try {
         const response = await fetch('/api/status');
